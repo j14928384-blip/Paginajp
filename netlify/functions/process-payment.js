@@ -485,7 +485,7 @@ exports.handler = async function(event, context) {
                     <p>Tu solicitud está actualmente en estado: <strong>PENDIENTE</strong>.</p>
                     <p>Estamos procesando tu recarga. Te enviaremos un <strong>correo de confirmación de la recarga completada y tu factura virtual una vez que tu recarga sea procesada</strong> por nuestro equipo.</p>
                     <p style="margin-top: 20px;">¡Gracias por confiar en Malok Recargas!</p>
-                    <p style="font-size: 0.9em; color: #777;">Si tienes alguna pregunta, contáctanos a través de nuestro WhatsApp: <a href="https://wa.me/584126949631" style="color: #28a745; text-decoration: none;">+58 412 6949631</a></p>
+                    <p style="font-size: 0.9em; color: #777;">Si tienes alguna pregunta, contáctanos a través de nuestro WhatsApp: <a href="https://wa.me/584143187185" style="color: #28a745; text-decoration: none;">+58 412 6949631</a></p>
                 </div>
             `,
         };
