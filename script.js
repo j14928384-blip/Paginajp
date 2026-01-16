@@ -35,7 +35,7 @@ async function applySiteConfig() {
 // =================================================================
 
 // ⚠️ ATENCIÓN: El CLIENT_ID es un identificador público.
-const GOOGLE_CLIENT_ID = '321583559900-b5kvkoleqdrpsup60n00ugls9ujg9jak.apps.googleusercontent.com'; 
+const GOOGLE_CLIENT_ID = '308840006976-mttmu0hd65scpg9umpgk4tt2qnrgn07d.apps.googleusercontent.com'; 
 
 /**
  * Función CLAVE para verificar la sesión en localStorage y actualizar la UI.
