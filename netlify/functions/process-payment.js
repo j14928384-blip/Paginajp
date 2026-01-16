@@ -131,7 +131,7 @@ exports.handler = async function(event, context) {
     }
 
     // --- Extracción y Normalización de Datos del Carrito y Globales ---
-    const { finalPrice, currency, paymentMethod, email, whatsappNumber, cartDetails, totalJPUSD } = data;
+    const { finalPrice, currency, paymentMethod, email, whatsappNumber, cartDetails } = data;
     
     // Normalizar el número de WhatsApp aquí
     const normalizedWhatsapp = normalizeWhatsappNumber(whatsappNumber);
@@ -169,12 +169,6 @@ exports.handler = async function(event, context) {
         methodSpecificDetails.txid = data.txid;
     } else if (paymentMethod === 'zinli') {
         methodSpecificDetails.reference = data.reference;
-    } else if (paymentMethod === 'nequi') {
-        methodSpecificDetails.reference = data.reference || 'Nequi Transfer';
-    } else if (paymentMethod === 'zelle') {
-        methodSpecificDetails.reference = 'Zelle Payment - Contact WhatsApp';
-    } else if (paymentMethod === 'wallet') {
-        methodSpecificDetails.reference = 'Wallet Deduction - Automatic';
     }
     
     // --- Guardar Transacción Inicial en Supabase ---
@@ -182,8 +176,7 @@ exports.handler = async function(event, context) {
     let id_transaccion_generado;
 
     try {
-        // 🎯 CAMBIO: Prefijo actualizado a JP-
-        id_transaccion_generado = `JP-${Date.now()}`;
+        id_transaccion_generado = `MALOK-${Date.now()}`;
 
         const firstItem = cartItems[0] || {};
         
@@ -197,8 +190,7 @@ exports.handler = async function(event, context) {
             methodDetails: methodSpecificDetails,
             status: 'pendiente',
             telegram_chat_id: TELEGRAM_CHAT_ID,
-            // 🎯 NUEVO: Guardar totalJPUSD si está disponible
-            total_jpusd: totalJPUSD ? parseFloat(totalJPUSD) : null,
+            // 🚨 Corrección: Asegura que el receipt_url se guarde correctamente
             receipt_url: paymentReceiptFile ? paymentReceiptFile.filepath : null,
             
             // Campo para el Google ID de la billetera
@@ -241,12 +233,11 @@ exports.handler = async function(event, context) {
     
     console.log("[DEBUG - GLOBAL] currency:", currency);
     console.log("[DEBUG - GLOBAL] finalPrice:", finalPrice);
-    console.log("[DEBUG - GLOBAL] totalJPUSD:", totalJPUSD);
 
-    // 🎯 CAMBIO: Nombre actualizado a JP STORE
+
     let messageText = isWalletRecharge 
-        ? `💸 Nueva Recarga de Billetera JP STORE 💸\n\n`
-        : `✨ Nueva Recarga (CARRITO) JP STORE ✨\n\n`;
+        ? `💸 Nueva Recarga de Billetera Malok Recargas 💸\n\n`
+        : `✨ Nueva Recarga (CARRITO) Malok Recargas ✨\n\n`;
     
     messageText += `*ID de Transacción:* \`${id_transaccion_generado || 'N/A'}\`\n`;
     messageText += `*Estado:* \`PENDIENTE\`\n`;
@@ -276,38 +267,36 @@ exports.handler = async function(event, context) {
             messageText += `👤 ID de Jugador: *${item.playerId}*\n`;
         }
         
-        // 🎯 LÓGICA ACTUALIZADA DE PRECIOS PARA SOPORTAR JPUSD
+        // --- INICIO DE LÓGICA DE PRECIOS CON DEBUGGING Y CORRECCIÓN ---
         console.log(`\n[DEBUG - ITEM ${index + 1}] --- PRECIOS EN CARRO ---`);
         console.log(`[DEBUG] item.currency (Inicial): ${item.currency}`);
         console.log(`[DEBUG] item.priceUSD: ${item.priceUSD}`);
-        console.log(`[DEBUG] item.priceJPUSD: ${item.priceJPUSD}`);
+        console.log(`[DEBUG] item.priceUSDM: ${item.priceUSDM}`);
         console.log(`[DEBUG] item.priceVES: ${item.priceVES}`);
-        console.log(`[DEBUG] item.priceCOP: ${item.priceCOP}`);
         
         let itemPrice;
-        let itemCurrency = currency; // Usa la moneda global
-        
+        // 🚀 CORRECCIÓN: Usamos la moneda de la transacción global para seleccionar el precio
+        // ya que la moneda individual del item está undefined.
+        let itemCurrency = currency; // AHORA USA LA MONEDA GLOBAL ('USDM', 'VES', o 'USD')
         console.log(`[DEBUG] itemCurrency (Seleccionada - Global): ${itemCurrency}`);
 
-        if (itemCurrency === 'JPUSD') { 
-            // 🎯 NUEVA LÓGICA: JPUSD usa priceJPUSD
-            itemPrice = item.priceJPUSD || item.priceUSD;
-            console.log(`[DEBUG] LÓGICA APLICADA: GLOBAL JPUSD. Price usado: ${itemPrice}. Fuente: item.priceJPUSD`);
+
+        if (itemCurrency === 'USDM') { 
+            // Lógica USDM: Fuerza a usar priceUSDM
+            itemPrice = item.priceUSDM;
+            console.log(`[DEBUG] LÓGICA APLICADA: GLOBAL USDM. Price usado: ${itemPrice}. Fuente: item.priceUSDM`);
         } else if (itemCurrency === 'VES') {
             // Lógica VES
             itemPrice = item.priceVES;
             console.log(`[DEBUG] LÓGICA APLICADA: GLOBAL VES. Price usado: ${itemPrice}. Fuente: item.priceVES`);
-        } else if (itemCurrency === 'COP') {
-            // 🎯 NUEVA LÓGICA: COP
-            itemPrice = item.priceCOP || item.priceUSD;
-            console.log(`[DEBUG] LÓGICA APLICADA: GLOBAL COP. Price usado: ${itemPrice}. Fuente: item.priceCOP`);
         } else {
-            // Lógica USD (o fallback si la moneda global no es JPUSD, VES ni COP)
+            // Lógica USD (o fallback si la moneda global no es USDM ni VES)
             itemPrice = item.priceUSD;
             console.log(`[DEBUG] LÓGICA APLICADA: GLOBAL USD/Fallback. Price usado: ${itemPrice}. Fuente: item.priceUSD`);
         }
         
         console.log(`[DEBUG - ITEM ${index + 1}] Final itemPrice (Raw): ${itemPrice}`);
+        // --- FIN DE LÓGICA DE PRECIOS CON DEBUGGING Y CORRECCIÓN ---
         
         if (itemPrice) {
             messageText += `💲 Precio (Est.): ${parseFloat(itemPrice).toFixed(2)} ${itemCurrency}\n`;
@@ -319,12 +308,6 @@ exports.handler = async function(event, context) {
     // Información de Pago y Contacto (Global)
     messageText += `\n*RESUMEN DE PAGO*\n`;
     messageText += `💰 *TOTAL A PAGAR:* *${finalPrice} ${currency}*\n`;
-    
-    // 🎯 AÑADIR: Mostrar totalJPUSD si existe
-    if (totalJPUSD && currency !== 'JPUSD') {
-        messageText += `💳 *Total JPUSD (Base):* *${parseFloat(totalJPUSD).toFixed(2)} JPUSD*\n`;
-    }
-    
     messageText += `💳 Método de Pago: *${paymentMethod.replace('-', ' ').toUpperCase()}*\n`;
     messageText += `📧 Correo Cliente: ${email}\n`;
     
@@ -342,13 +325,10 @@ exports.handler = async function(event, context) {
         messageText += `📊 Referencia Pago Móvil: ${methodSpecificDetails.reference || 'N/A'}\n`;
     } else if (paymentMethod === 'binance') {
         messageText += `🆔 TXID Binance: ${methodSpecificDetails.txid || 'N/A'}\n`;
-    } else if (paymentMethod === 'nequi') {
-        messageText += `📊 Referencia Nequi: ${methodSpecificDetails.reference || 'N/A'}\n`;
-    } else if (paymentMethod === 'zelle') {
-        messageText += `💳 Método Zelle: Contactar WhatsApp para datos\n`;
-    } else if (paymentMethod === 'wallet') {
-        messageText += `👛 Método Wallet: Deducción automática de saldo\n`;
+    } else if (paymentMethod === 'zinli') {
+        messageText += `📊 Referencia Zinli: ${methodSpecificDetails.reference || 'N/A'}\n`;
     }
+
 
     // Construcción de Botones Inline para Telegram
     const inlineKeyboard = [
@@ -379,7 +359,7 @@ exports.handler = async function(event, context) {
         });
         console.log("Mensaje de Telegram enviado con éxito.");
         
-        // 🚨 Enviar comprobante de pago a Telegram (sendDocument)
+        // 🚨 Corrección #1: Enviar comprobante de pago a Telegram (sendDocument)
         if (paymentReceiptFile && paymentReceiptFile.filepath) {
             console.log("Comprobante de pago detectado. Preparando envío a Telegram...");
             
@@ -392,7 +372,8 @@ exports.handler = async function(event, context) {
                 form.append('chat_id', TELEGRAM_CHAT_ID);
                 form.append('caption', captionText);
                 form.append('parse_mode', 'Markdown');
-                form.append('document', fileStream, paymentReceiptFile.originalFilename || 'comprobante_pago.jpg');
+                // 'document' es el campo necesario para enviar archivos.
+                form.append('document', fileStream, paymentReceiptFile.originalFilename || 'comprobante_pago.jpg'); 
 
                 const telegramDocumentApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`;
 
@@ -423,6 +404,7 @@ exports.handler = async function(event, context) {
 
     } catch (telegramError) {
         console.error("Error al enviar mensaje de Telegram o comprobante:", telegramError.response ? telegramError.response.data : telegramError.message);
+        // Si hay un error, el archivo temporal debe ser eliminado para evitar llenado de espacio.
     }
 
     // --- Enviar Confirmación por Correo Electrónico al Cliente ---
@@ -464,6 +446,7 @@ exports.handler = async function(event, context) {
                     <li><strong>Vinculación de CODM:</strong> ${item.codmVinculation || 'N/A'}</li>
                 `;
             } else if (game === 'Recarga de Saldo' && item.google_id) { 
+                // Agrega Google ID y Monto de recarga
                 playerInfoEmail = `
                     <li><strong>ID de Google (Billetera):</strong> ${item.google_id}</li>
                     <li><strong>Monto de Recarga (Paquete):</strong> ${packageName}</li>
@@ -483,11 +466,10 @@ exports.handler = async function(event, context) {
             `;
         });
         
-        // 🎯 CAMBIO: Nombre actualizado a JP STORE en el correo
         const mailOptions = {
             from: SENDER_EMAIL,
             to: email,
-            subject: `🎉 Tu Solicitud de Recarga (Pedido #${id_transaccion_generado}) con JP STORE ha sido Recibida! 🎉`,
+            subject: `🎉 Tu Solicitud de Recarga (Pedido #${id_transaccion_generado}) con Malok Recargas ha sido Recibida! 🎉`,
             html: `
                 <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
                     <h2 style="color: #007bff;">¡Hola!</h2>
@@ -502,7 +484,7 @@ exports.handler = async function(event, context) {
                     
                     <p>Tu solicitud está actualmente en estado: <strong>PENDIENTE</strong>.</p>
                     <p>Estamos procesando tu recarga. Te enviaremos un <strong>correo de confirmación de la recarga completada y tu factura virtual una vez que tu recarga sea procesada</strong> por nuestro equipo.</p>
-                    <p style="margin-top: 20px;">¡Gracias por confiar en JP STORE!</p>
+                    <p style="margin-top: 20px;">¡Gracias por confiar en Malok Recargas!</p>
                     <p style="font-size: 0.9em; color: #777;">Si tienes alguna pregunta, contáctanos a través de nuestro WhatsApp: <a href="https://wa.me/584126949631" style="color: #28a745; text-decoration: none;">+58 412 6949631</a></p>
                 </div>
             `,
@@ -522,6 +504,7 @@ exports.handler = async function(event, context) {
             }
         }
     }
+
 
     // --- Limpieza del archivo temporal después de todo procesamiento ---
     if (paymentReceiptFile && paymentReceiptFile.filepath && fs.existsSync(paymentReceiptFile.filepath)) {

@@ -29,7 +29,7 @@ exports.handler = async function(event, context) {
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
     try {
-        // Consulta a Supabase incluyendo los nuevos campos de precios:
+        // Consulta limpia a Supabase:
         const { data: producto, error } = await supabase
             .from('productos')
             .select(`
@@ -43,11 +43,10 @@ exports.handler = async function(event, context) {
                     nombre_paquete, 
                     precio_usd, 
                     precio_ves, 
-                    precio_jpusd,  // 👈 NUEVO: Cambiado de precio_usdm a precio_jpusd
-                    precio_cop,    // 👈 NUEVO: Agregado para soporte de moneda COP
+                    precio_usdm, 
                     orden
                 )
-            `) 
+            `) // 👈 CAMBIO CLAVE: Se agregó 'precio_usdm'
             .eq('slug', slug)
             .maybeSingle(); 
             

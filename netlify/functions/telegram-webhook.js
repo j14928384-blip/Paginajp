@@ -50,6 +50,7 @@ exports.handler = async (event, context) => {
         console.error("ERROR CRITICO al obtener configuración de DB:", e.message);
     }
 
+
     // ----------------------------------------------------------------------
     // 💡 LÓGICA CLAVE: Manejo de la consulta de Callback
     // ----------------------------------------------------------------------
@@ -73,7 +74,7 @@ exports.handler = async (event, context) => {
                 console.log(`LOG: Buscando datos de transacción ${transactionId} en 'transactions'.`);
                 const { data: transactionData, error: fetchError } = await supabase
                     .from('transactions')
-                    .select('status, google_id, "finalPrice", currency, game, "cartDetails", email, total_jpusd') // 🎯 Añadido total_jpusd
+                    .select('status, google_id, "finalPrice", currency, game, "cartDetails", email') 
                     .eq('id_transaccion', transactionId)
                     .maybeSingle();
 
@@ -90,15 +91,13 @@ exports.handler = async (event, context) => {
                     currency,
                     game,
                     "cartDetails": productDetails,
-                    email: transactionEmail,
-                    total_jpusd // 🎯 Nuevo: Obtener total_jpusd
+                    email: transactionEmail // OBTENEMOS EL EMAIL DIRECTO DE LA TRANSACCIÓN
                 } = transactionData;
                 
                 // INICIALIZAMOS emailCliente con el email de la transacción (fuente principal)
                 emailCliente = transactionEmail; 
 
                 console.log(`LOG: Transacción encontrada. Google ID: ${google_id}. Email en transac.: ${emailCliente || 'Nulo'}. Estado: ${currentStatus}.`);
-                console.log(`LOG: Moneda: ${currency}, Total JPUSD: ${total_jpusd}`);
                 
                 // 2.1. BÚSQUEDA SECUNDARIA: SOLO SI EL EMAIL DE LA TRANSACCIÓN ES NULO Y HAY GOOGLE_ID
                 if (!emailCliente && google_id) {
@@ -128,8 +127,9 @@ exports.handler = async (event, context) => {
                 let injectionMessage = ""; 
                 let updateDBSuccess = true; 
 
+
                 // -------------------------------------------------------------
-                // 3. LÓGICA DE INYECCIÓN CONDICIONAL ACTUALIZADA
+                // 3. LÓGICA DE INYECCIÓN CONDICIONAL 
                 // -------------------------------------------------------------
                 
                 if (currentStatus === NEW_STATUS) {
@@ -137,39 +137,19 @@ exports.handler = async (event, context) => {
                 } else {
                     
                     if (IS_WALLET_RECHARGE) { 
-                        // 🎯 LÓGICA ACTUALIZADA: DETERMINAR MONTO A INYECTAR
-                        console.log(`LOG: Detalles de moneda para inyección - Currency: ${currency}, Total JPUSD: ${total_jpusd}`);
-                        
-                        // 🎯 CASO 1: Si la moneda es JPUSD, usar total_jpusd directamente
-                        if (currency === 'JPUSD') {
-                            if (total_jpusd && total_jpusd > 0) {
-                                amountToInject = total_jpusd;
-                                console.log(`LOG: Moneda JPUSD detectada. Usando total_jpusd: $${amountToInject.toFixed(2)} USD.`);
-                            } else {
-                                // Fallback: usar el finalPrice si total_jpusd no está disponible
-                                amountToInject = amountInTransactionCurrency;
-                                console.log(`LOG: Moneda JPUSD pero total_jpusd no disponible. Usando finalPrice: $${amountToInject.toFixed(2)} USD.`);
-                            }
-                        }
-                        // 🎯 CASO 2: Si la moneda es VES, convertir con tasa
-                        else if (currency === 'VES' || currency === 'BS') { 
+                        // PASO 3.1: LÓGICA CONDICIONAL DE CONVERSIÓN
+                        if (currency === 'VES' || currency === 'BS') { 
                             if (EXCHANGE_RATE > 0) {
                                 amountToInject = amountInTransactionCurrency / EXCHANGE_RATE;
                                 console.log(`LOG: Moneda VES detectada. Convirtiendo ${amountInTransactionCurrency.toFixed(2)} VES a USD con tasa ${EXCHANGE_RATE}. Resultado: $${amountToInject.toFixed(2)} USD.`);
                             } else {
                                 throw new Error("ERROR FATAL: El tipo de cambio (tasa_dolar) no es válido o es cero. No se puede convertir VES a USD.");
                             }
-                        }
-                        // 🎯 CASO 3: Para USD, COP y otros, usar directamente el finalPrice
-                        else {
-                            // USD, COP, etc. - usar el monto final (ya en USD para USD, o en la moneda correspondiente)
-                            amountToInject = amountInTransactionCurrency;
-                            console.log(`LOG: Moneda ${currency} detectada. Usando finalPrice sin conversión: $${amountToInject.toFixed(2)} USD.`);
-                        }
+                        } 
 
                         // PASO 3.2: INYECCIÓN DE SALDO
                         if (!google_id || isNaN(amountToInject) || amountToInject <= 0) {
-                            injectionMessage = `\n\n❌ <b>ERROR DE INYECCIÓN DE SALDO:</b> Datos incompletos (Google ID: ${google_id}, Monto: ${amountToInject.toFixed(2)}). <b>¡REVISIÓN MANUAL REQUERIDA!</b>`;
+                            injectionMessage = `\n\n❌ <b>ERROR DE INYECCIÓN DE SALDO:</b> Datos incompletos (Google ID: ${google_id}, Monto: ${finalPrice}). <b>¡REVISIÓN MANUAL REQUERIDA!</b>`;
                             updateDBSuccess = false;
                         } else {
                             // 4. INYECTAR SALDO AL CLIENTE (Usando la función RPC)
@@ -203,6 +183,7 @@ exports.handler = async (event, context) => {
                     }
                 } 
 
+
                 // 5. ACTUALIZACIÓN DEL ESTADO... 
                 // Solo se actualiza si el estado actual es diferente y la inyección/proceso fue exitoso.
                 if (currentStatus !== NEW_STATUS && updateDBSuccess) {
@@ -227,15 +208,16 @@ exports.handler = async (event, context) => {
                     console.log(`LOG: Preparando envío de email simplificado. Email cliente: ${emailCliente || 'NO ENCONTRADO'}.`);
 
                     if (emailCliente) {
-                        // 🎯 CAMBIO: Nombre actualizado a JP STORE
-                        const invoiceSubject = `✅ ¡Pedido Entregado! Factura #${transactionId} - JP STORE`;
+                        const invoiceSubject = `✅ ¡Pedido Entregado! Factura #${transactionId} - ${game}`;
                         
+                        // 🚀 MODIFICACIÓN CLAVE: Mensaje de confirmación fijo y formal
                         const productDetailHtml = `
                             <p style="font-size: 1.1em; color: #007bff; font-weight: bold;">
                                 Le confirmamos que todos los productos de su pedido han sido procesados y entregados con éxito.
                             </p>
                             <p>Puede verificar el estado de su cuenta o billetera.</p>
                         `;
+                        // 🔚 FIN DE LA MODIFICACIÓN CLAVE
                         
                         const invoiceBody = `
                             <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -274,6 +256,7 @@ exports.handler = async (event, context) => {
                 // Si ya estaba REALIZADA, aún se considera un éxito en el marcado
                 const finalStatusText = (currentStatus === NEW_STATUS || updateDBSuccess) ? NEW_STATUS : 'ERROR CRÍTICO';
                 const finalStatusEmoji = (currentStatus === NEW_STATUS || updateDBSuccess) ? '✅' : '❌';
+
 
                 // 6. CONFIRMACIÓN Y EDICIÓN DEL MENSAJE DE TELEGRAM...
                 console.log("LOG: Editando mensaje de Telegram.");
@@ -322,7 +305,7 @@ async function sendInvoiceEmail(transactionId, userEmail, emailSubject, emailBod
     const transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST,
         port: port,
-        secure: port === 465,
+        secure: port === 465, // <-- Corrección de tipo de dato
         auth: {
             user: process.env.SMTP_USER,
             pass: process.env.SMTP_PASS
@@ -352,6 +335,7 @@ async function sendInvoiceEmail(transactionId, userEmail, emailSubject, emailBod
         return false;
     }
 }
+
 
 // Funciones de Telegram (sin cambios)
 async function editTelegramMessage(token, chatId, messageId, text, replyMarkup) {
