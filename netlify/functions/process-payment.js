@@ -9,51 +9,63 @@ const FormData = require('form-data');
 
 // Función de Normalización
 function normalizeWhatsappNumber(number) {
-    if (!number) return null;
+    console.log(`[LOG normalizeWhatsappNumber] Input number: "${number}"`);
+    
+    if (!number) {
+        console.log(`[LOG normalizeWhatsappNumber] Number is null/empty, returning null`);
+        return null;
+    }
 
     // 1. Eliminar todos los caracteres no numéricos
     let cleanedNumber = number.replace(/[^\d]/g, '');
+    console.log(`[LOG normalizeWhatsappNumber] Cleaned number: "${cleanedNumber}"`);
 
     // 2. Manejar prefijos comunes de Venezuela
-    // La forma estándar es 58412... o 58424...
     
     // Si empieza con '0412', '0414', '0416', '0424', '0426', etc. (Formato local con 0)
-    // Se asume que el código de país (58) está implícito si el número tiene 11 dígitos.
     if (cleanedNumber.length === 11 && cleanedNumber.startsWith('0')) {
-        // Quita el 0 y añade el 58. Ej: 04121234567 -> 584121234567
-        return '58' + cleanedNumber.substring(1);
+        const result = '58' + cleanedNumber.substring(1);
+        console.log(`[LOG normalizeWhatsappNumber] Pattern 1 matched (11 digits starting with 0): ${result}`);
+        return result;
     }
 
     // Si empieza con '580412', '580414', etc. (Formato +58 con el 0 del código de área)
     if (cleanedNumber.length === 13 && cleanedNumber.startsWith('580')) {
-        // Quita el 0 después del 58. Ej: 5804121234567 -> 584121234567
-        return '58' + cleanedNumber.substring(3);
+        const result = '58' + cleanedNumber.substring(3);
+        console.log(`[LOG normalizeWhatsappNumber] Pattern 2 matched (13 digits starting with 580): ${result}`);
+        return result;
     }
     
-    // Si ya empieza con '58' y tiene 12 dígitos, ya está correcto. Ej: 584121234567
+    // Si ya empieza con '58' y tiene 12 dígitos, ya está correcto
     if (cleanedNumber.length === 12 && cleanedNumber.startsWith('58')) {
+        console.log(`[LOG normalizeWhatsappNumber] Pattern 3 matched (12 digits starting with 58): ${cleanedNumber}`);
         return cleanedNumber;
     }
     
-    // Si empieza con el código de área sin el 58. (Poco probable, pero de seguridad)
+    // Si empieza con el código de área sin el 58
     if (cleanedNumber.length === 10 && (cleanedNumber.startsWith('412') || cleanedNumber.startsWith('424') || cleanedNumber.startsWith('414') || cleanedNumber.startsWith('416') || cleanedNumber.startsWith('426'))) {
-        return '58' + cleanedNumber;
+        const result = '58' + cleanedNumber;
+        console.log(`[LOG normalizeWhatsappNumber] Pattern 4 matched (10 digits with area code): ${result}`);
+        return result;
     }
 
-    // Si el número no encaja en los patrones de Venezuela, devolvemos el número limpio 
-    // por defecto, aunque para el link de WhatsApp debe ser el formato E.164 sin el +.
-    // Para simplificar, si no se pudo normalizar al formato 58..., devolvemos null o el original limpio.
+    // Si el número no encaja en los patrones de Venezuela
     if (cleanedNumber.length >= 10) {
-        // Si no cumple el formato 58... pero está limpio, lo devolvemos
+        console.log(`[LOG normalizeWhatsappNumber] Pattern 5 (fallback): returning cleaned number: ${cleanedNumber}`);
         return cleanedNumber; 
     }
 
-    return null; // Devuelve null si no es un número de teléfono válido/esperado
+    console.log(`[LOG normalizeWhatsappNumber] No pattern matched, returning null`);
+    return null;
 }
 
 
 exports.handler = async function(event, context) {
+    console.log(`[LOG handler] Function started. HTTP Method: ${event.httpMethod}`);
+    console.log(`[LOG handler] Headers: ${JSON.stringify(event.headers, null, 2)}`);
+    
     if (event.httpMethod !== "POST") {
+        console.log(`[LOG handler] Method not allowed: ${event.httpMethod}`);
         return { statusCode: 405, body: "Method Not Allowed" };
     }
 
@@ -63,15 +75,21 @@ exports.handler = async function(event, context) {
     // --- Configuración de Supabase ---
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+    console.log(`[LOG handler] Supabase URL configured: ${supabaseUrl ? 'YES' : 'NO'}`);
+    console.log(`[LOG handler] Supabase Service Key configured: ${supabaseServiceKey ? 'YES' : 'NO'}`);
+    
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // --- Parsing de FormData con formidable ---
+    console.log(`[LOG handler] Content-Type: ${event.headers['content-type']}`);
     const form = new Formidable({ multiples: true });
 
     let bodyBuffer;
     if (event.isBase64Encoded) {
+        console.log(`[LOG handler] Body is base64 encoded`);
         bodyBuffer = Buffer.from(event.body, 'base64');
     } else {
+        console.log(`[LOG handler] Body is NOT base64 encoded`);
         bodyBuffer = Buffer.from(event.body || '');
     }
 
@@ -84,36 +102,62 @@ exports.handler = async function(event, context) {
 
     try {
         if (event.headers['content-type'] && event.headers['content-type'].includes('multipart/form-data')) {
+            console.log(`[LOG handler] Processing multipart/form-data`);
             const { fields, files } = await new Promise((resolve, reject) => {
                 form.parse(reqStream, (err, fields, files) => {
                     if (err) {
-                        console.error('Formidable parse error:', err);
+                        console.error('[LOG handler] Formidable parse error:', err);
                         return reject(err); 
                     }
+                    console.log(`[LOG handler] Formidable fields keys: ${Object.keys(fields)}`);
+                    console.log(`[LOG handler] Formidable files keys: ${Object.keys(files)}`);
                     resolve({ fields, files });
                 });
             });
 
             // Procesar campos, tratando arrays de un solo elemento como strings
-            data = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, Array.isArray(value) ? value[0] : value]));
+            data = Object.fromEntries(Object.entries(fields).map(([key, value]) => {
+                console.log(`[LOG handler] Field ${key}: ${JSON.stringify(value)}`);
+                return [key, Array.isArray(value) ? value[0] : value];
+            }));
             
             // Aquí se toma el archivo de comprobante del campo 'paymentReceipt'
             paymentReceiptFile = files['paymentReceipt'] ? files['paymentReceipt'][0] : null;
+            console.log(`[LOG handler] Payment receipt file: ${paymentReceiptFile ? 'PRESENT' : 'ABSENT'}`);
+            if (paymentReceiptFile) {
+                console.log(`[LOG handler] Payment receipt details:`, {
+                    filepath: paymentReceiptFile.filepath,
+                    originalFilename: paymentReceiptFile.originalFilename,
+                    size: paymentReceiptFile.size
+                });
+            }
 
         } else if (event.headers['content-type'] && event.headers['content-type'].includes('application/json')) {
+            console.log(`[LOG handler] Processing application/json`);
             data = JSON.parse(event.body);
+            console.log(`[LOG handler] Parsed JSON data keys: ${Object.keys(data)}`);
         } else {
+            console.log(`[LOG handler] Processing other content type (likely x-www-form-urlencoded)`);
             const { parse } = require('querystring');
             data = parse(event.body);
+            console.log(`[LOG handler] Parsed form data keys: ${Object.keys(data)}`);
         }
+        
+        console.log(`[LOG handler] Final data object keys: ${Object.keys(data)}`);
+        console.log(`[LOG handler] Data object preview:`, Object.entries(data).map(([k, v]) => `${k}: ${typeof v === 'string' ? v.substring(0, 50) + (v.length > 50 ? '...' : '') : typeof v}`));
+        
     } catch (parseError) {
-        console.error("Error al procesar los datos de la solicitud:", parseError);
+        console.error("[LOG handler] Error al procesar los datos de la solicitud:", parseError);
         return {
             statusCode: 400,
-            body: JSON.stringify({ message: `Error al procesar los datos de la solicitud: ${parseError.message || 'Unknown error'}. Por favor, verifica tus datos e inténtalo de nuevo.` })
+            body: JSON.stringify({ 
+                message: `Error al procesar los datos de la solicitud: ${parseError.message || 'Unknown error'}. Por favor, verifica tus datos e inténtalo de nuevo.` 
+            })
         };
     }
 
+    // --- Verificación de Variables de Entorno ---
+    console.log(`[LOG handler] Checking environment variables...`);
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
     const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
     const SMTP_HOST = process.env.SMTP_HOST;
@@ -121,20 +165,96 @@ exports.handler = async function(event, context) {
     const SMTP_USER = process.env.SMTP_USER;
     const SMTP_PASS = process.env.SMTP_PASS;
     const SENDER_EMAIL = process.env.SENDER_EMAIL || SMTP_USER;
+    
+    console.log(`[LOG handler] TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN ? 'PRESENT' : 'MISSING'}`);
+    console.log(`[LOG handler] TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID ? 'PRESENT' : 'MISSING'}`);
+    console.log(`[LOG handler] SMTP_HOST: ${SMTP_HOST ? 'PRESENT' : 'MISSING'}`);
+    console.log(`[LOG handler] SMTP_PORT: ${SMTP_PORT ? 'PRESENT' : 'MISSING'}`);
+    console.log(`[LOG handler] SMTP_USER: ${SMTP_USER ? 'PRESENT' : 'MISSING'}`);
+    console.log(`[LOG handler] SMTP_PASS: ${SMTP_PASS ? 'PRESENT' : 'MISSING'}`);
+    console.log(`[LOG handler] SENDER_EMAIL: ${SENDER_EMAIL ? 'PRESENT' : 'MISSING'}`);
+    console.log(`[LOG handler] supabaseUrl: ${supabaseUrl ? 'PRESENT' : 'MISSING'}`);
+    console.log(`[LOG handler] supabaseServiceKey: ${supabaseServiceKey ? 'PRESENT' : 'MISSING'}`);
 
     if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID || !SMTP_HOST || !parseInt(SMTP_PORT, 10) || !SMTP_USER || !SMTP_PASS || !supabaseUrl || !supabaseServiceKey) {
-        console.error("Faltan variables de entorno requeridas o SMTP_PORT no es un número válido.");
+        console.error("[LOG handler] Faltan variables de entorno requeridas o SMTP_PORT no es un número válido.");
+        console.error(`[LOG handler] Missing variables:`, {
+            TELEGRAM_BOT_TOKEN: !TELEGRAM_BOT_TOKEN,
+            TELEGRAM_CHAT_ID: !TELEGRAM_CHAT_ID,
+            SMTP_HOST: !SMTP_HOST,
+            SMTP_PORT_VALID: !parseInt(SMTP_PORT, 10),
+            SMTP_USER: !SMTP_USER,
+            SMTP_PASS: !SMTP_PASS,
+            supabaseUrl: !supabaseUrl,
+            supabaseServiceKey: !supabaseServiceKey
+        });
         return {
             statusCode: 500,
-            body: JSON.stringify({ message: "Error de configuración del servidor: Faltan credenciales o configuración inválida." })
+            body: JSON.stringify({ 
+                message: "Error de configuración del servidor: Faltan credenciales o configuración inválida." 
+            })
         };
     }
 
     // --- Extracción y Normalización de Datos del Carrito y Globales ---
+    console.log(`[LOG handler] Extracting data from request...`);
     const { finalPrice, currency, paymentMethod, email, whatsappNumber, cartDetails } = data;
     
+    console.log(`[LOG handler] Data extracted:`, {
+        finalPrice,
+        currency,
+        paymentMethod,
+        email,
+        whatsappNumber,
+        cartDetailsLength: cartDetails ? cartDetails.length : 0
+    });
+    
+    // Validar campos requeridos
+    if (!finalPrice) {
+        console.error(`[LOG handler] MISSING VARIABLE: finalPrice is required`);
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ message: "Falta el campo 'finalPrice'." })
+        };
+    }
+    
+    if (!currency) {
+        console.error(`[LOG handler] MISSING VARIABLE: currency is required`);
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ message: "Falta el campo 'currency'." })
+        };
+    }
+    
+    if (!paymentMethod) {
+        console.error(`[LOG handler] MISSING VARIABLE: paymentMethod is required`);
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ message: "Falta el campo 'paymentMethod'." })
+        };
+    }
+    
+    if (!email) {
+        console.error(`[LOG handler] MISSING VARIABLE: email is required`);
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ message: "Falta el campo 'email'." })
+        };
+    }
+    
+    if (!cartDetails) {
+        console.error(`[LOG handler] MISSING VARIABLE: cartDetails is required`);
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ message: "Falta el campo 'cartDetails'." })
+        };
+    }
+    
     // Normalizar el número de WhatsApp aquí
+    console.log(`[LOG handler] Normalizing WhatsApp number: "${whatsappNumber}"`);
     const normalizedWhatsapp = normalizeWhatsappNumber(whatsappNumber);
+    console.log(`[LOG handler] Normalized WhatsApp: "${normalizedWhatsapp}"`);
+    
     if (normalizedWhatsapp) {
         data.whatsappNumber = normalizedWhatsapp;
     }
@@ -143,9 +263,26 @@ exports.handler = async function(event, context) {
     let cartItems = [];
     if (cartDetails) {
         try {
+            console.log(`[LOG handler] Parsing cartDetails JSON...`);
             cartItems = JSON.parse(cartDetails);
+            console.log(`[LOG handler] Parsed ${cartItems.length} cart items`);
+            
+            // Log detalles de cada item
+            cartItems.forEach((item, index) => {
+                console.log(`[LOG handler] Cart item ${index + 1}:`, {
+                    game: item.game,
+                    packageName: item.packageName,
+                    playerId: item.playerId,
+                    google_id: item.google_id,
+                    priceUSD: item.priceUSD,
+                    priceUSDM: item.priceUSDM,
+                    priceVES: item.priceVES,
+                    currency: item.currency
+                });
+            });
         } catch (e) {
-            console.error("Error al parsear cartDetails JSON:", e);
+            console.error("[LOG handler] Error al parsear cartDetails JSON:", e);
+            console.error("[LOG handler] cartDetails content:", cartDetails.substring(0, 500));
             return {
                 statusCode: 400,
                 body: JSON.stringify({ message: "Formato de detalles del carrito inválido." })
@@ -154,6 +291,7 @@ exports.handler = async function(event, context) {
     }
 
     if (cartItems.length === 0) {
+        console.error(`[LOG handler] Cart is empty`);
         return {
             statusCode: 400,
             body: JSON.stringify({ message: "El carrito de compra está vacío." })
@@ -162,12 +300,24 @@ exports.handler = async function(event, context) {
     
     // Obtener detalles específicos del método de pago
     let methodSpecificDetails = {};
+    console.log(`[LOG handler] Processing payment method: ${paymentMethod}`);
+    
     if (paymentMethod === 'pago-movil') {
+        console.log(`[LOG handler] Pago Móvil details:`, {
+            phone: data.phone,
+            reference: data.reference
+        });
         methodSpecificDetails.phone = data.phone;
         methodSpecificDetails.reference = data.reference;
     } else if (paymentMethod === 'binance') {
+        console.log(`[LOG handler] Binance details:`, {
+            txid: data.txid
+        });
         methodSpecificDetails.txid = data.txid;
     } else if (paymentMethod === 'zinli') {
+        console.log(`[LOG handler] Zinli details:`, {
+            reference: data.reference
+        });
         methodSpecificDetails.reference = data.reference;
     }
     
@@ -177,6 +327,7 @@ exports.handler = async function(event, context) {
 
     try {
         id_transaccion_generado = `MALOK-${Date.now()}`;
+        console.log(`[LOG handler] Generated transaction ID: ${id_transaccion_generado}`);
 
         const firstItem = cartItems[0] || {};
         
@@ -190,13 +341,8 @@ exports.handler = async function(event, context) {
             methodDetails: methodSpecificDetails,
             status: 'pendiente',
             telegram_chat_id: TELEGRAM_CHAT_ID,
-            // 🚨 Corrección: Asegura que el receipt_url se guarde correctamente
             receipt_url: paymentReceiptFile ? paymentReceiptFile.filepath : null,
-            
-            // Campo para el Google ID de la billetera
             google_id: firstItem.google_id || null, 
-            
-            // Campos de compatibilidad
             game: firstItem.game || 'Carrito Múltiple',
             packageName: firstItem.packageName || 'Múltiples Paquetes',
             playerId: firstItem.playerId || null,
@@ -207,19 +353,23 @@ exports.handler = async function(event, context) {
             codm_vinculation: firstItem.codmVinculation || null
         };
 
+        console.log(`[LOG handler] Inserting transaction to Supabase:`, transactionToInsert);
+
         const { data: insertedData, error: insertError } = await supabase
             .from('transactions')
             .insert(transactionToInsert)
             .select();
 
         if (insertError) {
+            console.error(`[LOG handler] Supabase insert error:`, insertError);
             throw insertError; 
         }
+        
         newTransactionData = insertedData[0];
-        console.log("Transacción guardada en Supabase con ID interno:", newTransactionData.id);
+        console.log(`[LOG handler] Transacción guardada en Supabase con ID interno:`, newTransactionData.id);
 
     } catch (supabaseError) {
-        console.error("Error al guardar la transacción en Supabase:", supabaseError.message);
+        console.error("[LOG handler] Error al guardar la transacción en Supabase:", supabaseError.message);
         return {
             statusCode: 500,
             body: JSON.stringify({ message: "Error al guardar la transacción en la base de datos." })
@@ -227,13 +377,14 @@ exports.handler = async function(event, context) {
     }
 
     // --- Generar Notificación para Telegram ---
+    console.log(`[LOG handler] Generating Telegram notification...`);
     
     const firstItem = cartItems[0] || {};
     const isWalletRecharge = cartItems.length === 1 && firstItem.game === 'Recarga de Saldo';
     
-    console.log("[DEBUG - GLOBAL] currency:", currency);
-    console.log("[DEBUG - GLOBAL] finalPrice:", finalPrice);
-
+    console.log(`[LOG handler] isWalletRecharge: ${isWalletRecharge}`);
+    console.log(`[LOG handler] GLOBAL currency: ${currency}`);
+    console.log(`[LOG handler] GLOBAL finalPrice: ${finalPrice}`);
 
     let messageText = isWalletRecharge 
         ? `💸 Nueva Recarga de Billetera Malok Recargas 💸\n\n`
@@ -251,6 +402,12 @@ exports.handler = async function(event, context) {
 
     // Iterar sobre los productos del carrito para el detalle
     cartItems.forEach((item, index) => {
+        console.log(`\n[LOG handler] Processing cart item ${index + 1} for Telegram:`);
+        console.log(`[LOG handler] item.currency (Inicial): ${item.currency}`);
+        console.log(`[LOG handler] item.priceUSD: ${item.priceUSD}`);
+        console.log(`[LOG handler] item.priceUSDM: ${item.priceUSDM}`);
+        console.log(`[LOG handler] item.priceVES: ${item.priceVES}`);
+        
         messageText += `*📦 Producto ${index + 1}:*\n`;
         messageText += `🎮 Juego/Servicio: *${item.game || 'N/A'}*\n`;
         messageText += `📦 Paquete: *${item.packageName || 'N/A'}*\n`;
@@ -267,36 +424,24 @@ exports.handler = async function(event, context) {
             messageText += `👤 ID de Jugador: *${item.playerId}*\n`;
         }
         
-        // --- INICIO DE LÓGICA DE PRECIOS CON DEBUGGING Y CORRECCIÓN ---
-        console.log(`\n[DEBUG - ITEM ${index + 1}] --- PRECIOS EN CARRO ---`);
-        console.log(`[DEBUG] item.currency (Inicial): ${item.currency}`);
-        console.log(`[DEBUG] item.priceUSD: ${item.priceUSD}`);
-        console.log(`[DEBUG] item.priceUSDM: ${item.priceUSDM}`);
-        console.log(`[DEBUG] item.priceVES: ${item.priceVES}`);
-        
+        // Lógica de precios
         let itemPrice;
-        // 🚀 CORRECCIÓN: Usamos la moneda de la transacción global para seleccionar el precio
-        // ya que la moneda individual del item está undefined.
-        let itemCurrency = currency; // AHORA USA LA MONEDA GLOBAL ('USDM', 'VES', o 'USD')
-        console.log(`[DEBUG] itemCurrency (Seleccionada - Global): ${itemCurrency}`);
-
+        let itemCurrency = currency; // Usa la moneda global
+        
+        console.log(`[LOG handler] itemCurrency (Seleccionada - Global): ${itemCurrency}`);
 
         if (itemCurrency === 'USDM') { 
-            // Lógica USDM: Fuerza a usar priceUSDM
             itemPrice = item.priceUSDM;
-            console.log(`[DEBUG] LÓGICA APLICADA: GLOBAL USDM. Price usado: ${itemPrice}. Fuente: item.priceUSDM`);
+            console.log(`[LOG handler] LÓGICA APLICADA: GLOBAL USDM. Price usado: ${itemPrice}. Fuente: item.priceUSDM`);
         } else if (itemCurrency === 'VES') {
-            // Lógica VES
             itemPrice = item.priceVES;
-            console.log(`[DEBUG] LÓGICA APLICADA: GLOBAL VES. Price usado: ${itemPrice}. Fuente: item.priceVES`);
+            console.log(`[LOG handler] LÓGICA APLICADA: GLOBAL VES. Price usado: ${itemPrice}. Fuente: item.priceVES`);
         } else {
-            // Lógica USD (o fallback si la moneda global no es USDM ni VES)
             itemPrice = item.priceUSD;
-            console.log(`[DEBUG] LÓGICA APLICADA: GLOBAL USD/Fallback. Price usado: ${itemPrice}. Fuente: item.priceUSD`);
+            console.log(`[LOG handler] LÓGICA APLICADA: GLOBAL USD/Fallback. Price usado: ${itemPrice}. Fuente: item.priceUSD`);
         }
         
-        console.log(`[DEBUG - ITEM ${index + 1}] Final itemPrice (Raw): ${itemPrice}`);
-        // --- FIN DE LÓGICA DE PRECIOS CON DEBUGGING Y CORRECCIÓN ---
+        console.log(`[LOG handler] Final itemPrice (Raw): ${itemPrice}`);
         
         if (itemPrice) {
             messageText += `💲 Precio (Est.): ${parseFloat(itemPrice).toFixed(2)} ${itemCurrency}\n`;
@@ -329,6 +474,7 @@ exports.handler = async function(event, context) {
         messageText += `📊 Referencia Zinli: ${methodSpecificDetails.reference || 'N/A'}\n`;
     }
 
+    console.log(`[LOG handler] Telegram message text length: ${messageText.length} characters`);
 
     // Construcción de Botones Inline para Telegram
     const inlineKeyboard = [
@@ -341,6 +487,7 @@ exports.handler = async function(event, context) {
         inlineKeyboard.push(
             [{ text: "💬 Contactar Cliente por WhatsApp", url: whatsappLink }]
         );
+        console.log(`[LOG handler] WhatsApp link created: ${whatsappLink}`);
     }
     
     const replyMarkup = {
@@ -351,17 +498,18 @@ exports.handler = async function(event, context) {
     let telegramMessageResponse;
 
     try {
+        console.log(`[LOG handler] Sending Telegram message...`);
         telegramMessageResponse = await axios.post(telegramApiUrl, {
             chat_id: TELEGRAM_CHAT_ID,
             text: messageText,
             parse_mode: 'Markdown',
             reply_markup: replyMarkup
         });
-        console.log("Mensaje de Telegram enviado con éxito.");
+        console.log(`[LOG handler] Mensaje de Telegram enviado con éxito.`);
         
         // 🚨 Corrección #1: Enviar comprobante de pago a Telegram (sendDocument)
         if (paymentReceiptFile && paymentReceiptFile.filepath) {
-            console.log("Comprobante de pago detectado. Preparando envío a Telegram...");
+            console.log(`[LOG handler] Comprobante de pago detectado. Preparando envío a Telegram...`);
             
             // Asegúrate de que el archivo exista antes de intentar leerlo
             if (fs.existsSync(paymentReceiptFile.filepath)) {
@@ -372,8 +520,7 @@ exports.handler = async function(event, context) {
                 form.append('chat_id', TELEGRAM_CHAT_ID);
                 form.append('caption', captionText);
                 form.append('parse_mode', 'Markdown');
-                // 'document' es el campo necesario para enviar archivos.
-                form.append('document', fileStream, paymentReceiptFile.originalFilename || 'comprobante_pago.jpg'); 
+                form.append('document', fileStream, paymentReceiptFile.originalFilename || 'comprobante_pago.jpg');
 
                 const telegramDocumentApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`;
 
@@ -382,9 +529,9 @@ exports.handler = async function(event, context) {
                     maxContentLength: Infinity,
                     maxBodyLength: Infinity,
                 });
-                console.log("Comprobante enviado a Telegram con éxito.");
+                console.log(`[LOG handler] Comprobante enviado a Telegram con éxito.`);
             } else {
-                console.warn("ADVERTENCIA: Archivo de comprobante temporal no encontrado en la ruta:", paymentReceiptFile.filepath);
+                console.warn(`[LOG handler] ADVERTENCIA: Archivo de comprobante temporal no encontrado en la ruta:`, paymentReceiptFile.filepath);
             }
         }
         
@@ -396,19 +543,20 @@ exports.handler = async function(event, context) {
                 .eq('id', newTransactionData.id);
 
             if (updateError) {
-                console.error("Error al actualizar la transacción en Supabase con telegram_message_id:", updateError.message);
+                console.error(`[LOG handler] Error al actualizar la transacción en Supabase con telegram_message_id:`, updateError.message);
             } else {
-                console.log("Transaction actualizada en Supabase con telegram_message_id:", telegramMessageResponse.data.result.message_id);
+                console.log(`[LOG handler] Transaction actualizada en Supabase con telegram_message_id:`, telegramMessageResponse.data.result.message_id);
             }
         }
 
     } catch (telegramError) {
-        console.error("Error al enviar mensaje de Telegram o comprobante:", telegramError.response ? telegramError.response.data : telegramError.message);
-        // Si hay un error, el archivo temporal debe ser eliminado para evitar llenado de espacio.
+        console.error(`[LOG handler] Error al enviar mensaje de Telegram o comprobante:`, telegramError.response ? telegramError.response.data : telegramError.message);
     }
 
     // --- Enviar Confirmación por Correo Electrónico al Cliente ---
     if (email) {
+        console.log(`[LOG handler] Preparing to send email to: ${email}`);
+        
         let transporter;
         try {
             transporter = nodemailer.createTransport({
@@ -423,8 +571,9 @@ exports.handler = async function(event, context) {
                     rejectUnauthorized: false
                 }
             });
+            console.log(`[LOG handler] Nodemailer transporter created successfully`);
         } catch (createTransportError) {
-            console.error("Error al crear el transportador de Nodemailer:", createTransportError);
+            console.error(`[LOG handler] Error al crear el transportador de Nodemailer:`, createTransportError);
         }
 
         // Generar el HTML de los detalles del carrito para el correo
@@ -446,7 +595,6 @@ exports.handler = async function(event, context) {
                     <li><strong>Vinculación de CODM:</strong> ${item.codmVinculation || 'N/A'}</li>
                 `;
             } else if (game === 'Recarga de Saldo' && item.google_id) { 
-                // Agrega Google ID y Monto de recarga
                 playerInfoEmail = `
                     <li><strong>ID de Google (Billetera):</strong> ${item.google_id}</li>
                     <li><strong>Monto de Recarga (Paquete):</strong> ${packageName}</li>
@@ -493,31 +641,35 @@ exports.handler = async function(event, context) {
         try {
             if (transporter) {
                 await transporter.sendMail(mailOptions);
-                console.log("Correo de confirmación inicial enviado al cliente:", email);
+                console.log(`[LOG handler] Correo de confirmación inicial enviado al cliente: ${email}`);
             } else {
-                 console.error("Transporter no inicializado, omitiendo envío de correo.");
+                 console.error(`[LOG handler] Transporter no inicializado, omitiendo envío de correo.`);
             }
         } catch (emailError) {
-            console.error("Error al enviar el correo de confirmación inicial:", emailError.message);
+            console.error(`[LOG handler] Error al enviar el correo de confirmación inicial:`, emailError.message);
             if (emailError.response) {
-                console.error("Detalles del error SMTP:", emailError.response);
+                console.error(`[LOG handler] Detalles del error SMTP:`, emailError.response);
             }
         }
+    } else {
+        console.log(`[LOG handler] No email provided, skipping email notification`);
     }
-
 
     // --- Limpieza del archivo temporal después de todo procesamiento ---
     if (paymentReceiptFile && paymentReceiptFile.filepath && fs.existsSync(paymentReceiptFile.filepath)) {
         try {
             fs.unlinkSync(paymentReceiptFile.filepath);
-            console.log("Archivo temporal del comprobante eliminado al finalizar la función.");
+            console.log(`[LOG handler] Archivo temporal del comprobante eliminado al finalizar la función.`);
         } catch (unlinkError) {
-            console.error("Error al eliminar el archivo temporal del comprobante:", unlinkError);
+            console.error(`[LOG handler] Error al eliminar el archivo temporal del comprobante:`, unlinkError);
         }
     }
 
+    console.log(`[LOG handler] Function completed successfully`);
     return {
         statusCode: 200,
-        body: JSON.stringify({ message: "Solicitud de pago recibida exitosamente. ¡Te enviaremos una confirmación pronto!" }),
+        body: JSON.stringify({ 
+            message: "Solicitud de pago recibida exitosamente. ¡Te enviaremos una confirmación pronto!" 
+        }),
     };
 };
